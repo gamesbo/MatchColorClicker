@@ -41,24 +41,6 @@ public class PlayerController : MonoBehaviour
     {
         Movement();
     }
-    void LevelUp()
-    {
-        //GameObject Parti = Instantiate(Resources.Load("StarPoof"), new Vector3(transform.position.x, transform.position.y + 1.5f, transform.position.z), Quaternion.identity) as GameObject;
-        //Parti.transform.SetParent(gameObject.transform);
-        switch (stickmanLevel)
-        {
-            case 0:
-                break;
-            case 1:
-                break;
-            case 2:
-                break;
-            case 3:
-                break;
-            case 4:
-                break;
-        }
-    }
   
     #region Movement
     void Movement()
