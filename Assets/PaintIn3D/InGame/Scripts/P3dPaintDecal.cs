@@ -256,7 +256,7 @@ namespace PaintIn3D
 			var finalSize   = P3dHelper.ScaleAspect(finalScale * finalRadius, finalAspect);
 
 			P3dCommandDecal.Instance.SetShape(rotation, finalSize, finalAngle);
-
+			//Debug.Log(finalColor);
 			P3dCommandDecal.Instance.SetMaterial(blendMode, finalTexture, shape, shapeChannel, finalHardness, wrapping, normalBack, normalFront, normalFade, finalColor, finalOpacity, tileTexture, finalMatrix, tileOpacity, tileTransition);
 
 			return finalSize;

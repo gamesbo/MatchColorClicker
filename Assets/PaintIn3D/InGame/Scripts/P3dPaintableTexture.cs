@@ -845,6 +845,7 @@ namespace PaintIn3D
 		[ContextMenu("Update Material")]
 		public void UpdateMaterial()
 		{
+
 			if (Paintable != null)
 			{
 				material    = P3dHelper.GetMaterial(paintable.CachedRenderer, slot.Index);
