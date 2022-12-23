@@ -1,0 +1,213 @@
+﻿// Copyright 2018 Prized Goat
+// Prized Goat is a small indie group of friends, if this file was obtained without purchase,
+// please support our efforts by purchasing a copy from the Unity Asset Store.  Thanks
+
+#pragma kernel CSMain
+
+struct Triangle
+{
+	float2 UVa0;
+	float2 UVa1;
+	float2 UVa2;
+
+	float3 VertPos1;
+	float3 VertPos2;
+	float3 VertPos3;
+
+	float3 VertNormal1;
+	float3 VertNormal2;
+	float3 VertNormal3;
+};
+
+int resX;
+int resY;
+float noiseSize;
+float3 idOffset;
+RWTexture2D<float4> rendTex;
+const StructuredBuffer<Triangle> tris;
+
+StructuredBuffer<float> TimingBuffer;  // used as a low cost buffer which the cpu can request.  this lets us get timing data so we can predict and throttle submits before they have actually finished.
+
+// Calculate signed triangle area using a kind of "2D cross product":
+float TriArea(float2 p1, float2 p2, float2 p3)
+{
+	float2 v1 = p1 - p3;
+	float2 v2 = p2 - p3;
+	return (v1.x * v2.y - v1.y * v2.x) / 2;
+}
+
+
+float noise3D(float3 p)
+{
+	return frac(sin(dot(p, float3(12.9898f, 78.233f, 128.852f))) * 43758.5453f) * 2.0f - 1.0f;
+}
+
+float simplex3D(float3 p)
+{
+	float f3 = 1.0 / 3.0;
+	float s = (p.x + p.y + p.z)*f3;
+	int i = int(floor(p.x + s));
+	int j = int(floor(p.y + s));
+	int k = int(floor(p.z + s));
+
+	float g3 = 1.0 / 6.0;
+	float t = float((i + j + k))*g3;
+	float x0 = float(i) - t;
+	float y0 = float(j) - t;
+	float z0 = float(k) - t;
+	x0 = p.x - x0;
+	y0 = p.y - y0;
+	z0 = p.z - z0;
+
+	int i1, j1, k1;
+	int i2, j2, k2;
+
+	if (x0 >= y0)
+	{
+		if (y0 >= z0) { i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 1; k2 = 0; } // X Y Z order
+		else if (x0 >= z0) { i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 0; k2 = 1; } // X Z Y order
+		else { i1 = 0; j1 = 0; k1 = 1; i2 = 1; j2 = 0; k2 = 1; }  // Z X Z order
+	}
+	else
+	{
+		if (y0<z0) { i1 = 0; j1 = 0; k1 = 1; i2 = 0; j2 = 1; k2 = 1; } // Z Y X order
+		else if (x0<z0) { i1 = 0; j1 = 1; k1 = 0; i2 = 0; j2 = 1; k2 = 1; } // Y Z X order
+		else { i1 = 0; j1 = 1; k1 = 0; i2 = 1; j2 = 1; k2 = 0; } // Y X Z order
+	}
+
+	float x1 = x0 - float(i1) + g3;
+	float y1 = y0 - float(j1) + g3;
+	float z1 = z0 - float(k1) + g3;
+	float x2 = x0 - float(i2) + 2.0*g3;
+	float y2 = y0 - float(j2) + 2.0*g3;
+	float z2 = z0 - float(k2) + 2.0*g3;
+	float x3 = x0 - 1.0 + 3.0*g3;
+	float y3 = y0 - 1.0 + 3.0*g3;
+	float z3 = z0 - 1.0 + 3.0*g3;
+
+	float3 ijk0 = float3(i, j, k);
+	float3 ijk1 = float3(i + i1, j + j1, k + k1);
+	float3 ijk2 = float3(i + i2, j + j2, k + k2);
+	float3 ijk3 = float3(i + 1, j + 1, k + 1);
+
+	float3 gr0 = normalize(float3(noise3D(ijk0), noise3D(ijk0 * 2.01f), noise3D(ijk0 * 2.02f)));
+	float3 gr1 = normalize(float3(noise3D(ijk1), noise3D(ijk1 * 2.01f), noise3D(ijk1 * 2.02f)));
+	float3 gr2 = normalize(float3(noise3D(ijk2), noise3D(ijk2 * 2.01f), noise3D(ijk2 * 2.02f)));
+	float3 gr3 = normalize(float3(noise3D(ijk3), noise3D(ijk3 * 2.01f), noise3D(ijk3 * 2.02f)));
+
+	float n0 = 0.0;
+	float n1 = 0.0;
+	float n2 = 0.0;
+	float n3 = 0.0;
+
+	float t0 = 0.5 - x0 * x0 - y0 * y0 - z0 * z0;
+	if (t0 >= 0.0)
+	{
+		t0 *= t0;
+		n0 = t0 * t0 * dot(gr0, float3(x0, y0, z0));
+	}
+	float t1 = 0.5 - x1 * x1 - y1 * y1 - z1 * z1;
+	if (t1 >= 0.0)
+	{
+		t1 *= t1;
+		n1 = t1 * t1 * dot(gr1, float3(x1, y1, z1));
+	}
+	float t2 = 0.5 - x2 * x2 - y2 * y2 - z2 * z2;
+	if (t2 >= 0.0)
+	{
+		t2 *= t2;
+		n2 = t2 * t2 * dot(gr2, float3(x2, y2, z2));
+	}
+	float t3 = 0.5 - x3 * x3 - y3 * y3 - z3 * z3;
+	if (t3 >= 0.0)
+	{
+		t3 *= t3;
+		n3 = t3 * t3 * dot(gr3, float3(x3, y3, z3));
+	}
+	return 96.0f * (n0 + n1 + n2 + n3);
+}
+
+float fbm(float3 p)
+{
+	float f;
+	f = 0.5f * simplex3D(p); p = p * 2.01;
+	f += 0.25f * simplex3D(p); p = p * 2.02;
+	f += 0.125f * simplex3D(p); p = p * 2.03;
+	f += 0.0625f * simplex3D(p); p = p * 2.04;
+	f += 0.03125f * simplex3D(p);
+	return f;
+}
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID, uint3 Gid : SV_GroupID, uint3 GTid : SV_GroupThreadID, uint GI : SV_GroupIndex)
+{
+	// This offsets the render space to work with the tiled rendering
+	int3 offsetID = id + idOffset;
+
+	rendTex[offsetID.xy] = float4(0.5f, 0.5f, 0.5f, 1);
+
+	float2 uv = float2((float)offsetID.x / resX, (float)offsetID.y / resY) + float2(0.5f / resX, 0.5f / resY);
+
+	float2 u1;
+	float2 u2;
+	float2 u3;
+
+	float a;
+	float a1;
+	float a2;
+	float a3;
+
+	float3 v1;
+	float3 v2;
+	float3 v3;
+
+	float3 pixelWorldPos;
+	float output;
+
+	for (uint i = 0; i < tris.Length; i++)
+	{
+		u1 = tris[i].UVa0; // get the triangle UVs
+		u2 = tris[i].UVa1;
+		u3 = tris[i].UVa2;
+
+		// calculate triangle area - if zero, skip it
+		a = TriArea(u1, u2, u3);
+		if (a == 0)
+		{
+			continue;
+		}
+
+		// calculate barycentric coordinates of u1, u2 and u3
+		// if anyone is negative, point is outside the triangle: skip it
+		a1 = TriArea(u2, u3, uv) / a;
+		if (a1 < 0)
+		{
+			continue;
+		}
+
+		a2 = TriArea(u3, u1, uv) / a;
+		if (a2 < 0)
+		{
+			continue;
+		}
+
+		a3 = TriArea(u1, u2, uv) / a;
+		if (a3 < 0)
+		{
+			continue;
+		}
+
+		v1 = tris[i].VertPos1;
+		v2 = tris[i].VertPos2;
+		v3 = tris[i].VertPos3;
+		pixelWorldPos = (a1 * v1) + (a2 * v2) + (a3 * v3);
+
+		pixelWorldPos = (pixelWorldPos * (1.0f / noiseSize));
+		
+		output = fbm(pixelWorldPos) * 0.5 + 0.5;
+
+		rendTex[offsetID.xy] = float4(output, output, output,1);
+
+		i = tris.Length;   //assumes the first valid value found is the only value we need to find.
+	}
+}

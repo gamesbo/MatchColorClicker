@@ -1,0 +1,158 @@
+﻿// Copyright 2018 Prized Goat
+// Prized Goat is a small indie group of friends, if this file was obtained without purchase,
+// please support our efforts by purchasing a copy from the Unity Asset Store.  Thanks
+
+#pragma kernel CSMainErase
+
+struct Triangle
+{
+	float2 UVa0;
+	float2 UVa1;
+	float2 UVa2;
+
+	float2 UVb0;
+	float2 UVb1;
+	float2 UVb2;
+
+	float AreaPreCalc;
+	float2 BoundsMin;
+	float2 BoundsMax;
+
+	float Vert1Depth;
+	float Vert2Depth;
+	float Vert3Depth;
+};
+
+int ResX;
+int ResY;
+float BleedSize;
+Texture2D<float4> BrushTex;
+SamplerState samplerBrushTex;
+Texture2D<float4> SourceTex;
+SamplerState samplerSourceTex;
+RWTexture2D<float4> BackgroundTex;
+RWTexture2D<float4> AlphaTex;
+const StructuredBuffer<Triangle> Tris;
+float4 BrushColor;
+float3 idOffset;
+
+// calculate signed triangle area using a kind of "2D cross product":
+float TriArea(float2 p1, float2 p2, float2 p3)
+{
+	float2 v1 = p1 - p3;
+	float2 v2 = p2 - p3;
+	return (v1.x * v2.y - v1.y * v2.x) / 2;
+}
+
+float signedToLine2D(float2 v1, float2 v2, float2 p)
+{
+	float2 ld = v1 - v2;
+	float2 pd = p - v2;
+	return abs(sign(ld.x * pd.y - ld.y * pd.x));
+}
+
+float distToLineSeg2D(float2 l1, float2 l2, float2 p)
+{
+	float2 ld = l1 - l2;
+	float2 pd = p - l2;
+
+	return length(pd - ld * clamp(dot(pd, ld) / dot(ld, ld), 0.0, 1.0));
+}
+
+[numthreads(8, 8, 1)]
+void CSMainErase(uint3 id : SV_DispatchThreadID, uint3 Gid : SV_GroupID, uint3 GTid : SV_GroupThreadID, uint GI : SV_GroupIndex)
+{
+	int3 offsetID = id + idOffset;
+
+	float2 uv = float2((float)offsetID.x / ResX, (float)offsetID.y / ResY) + float2(0.5f / ResX, 0.5f / ResY);
+
+	{
+		float2 u1;
+		float2 u2;
+		float2 u3;
+		float a;
+		float a1;
+		float a2;
+		float a3;
+		float4 newBackground;
+		float4 originalBackground;
+		float brushMaxValue = 0;
+
+		newBackground = SourceTex[offsetID.xy];
+		originalBackground = newBackground;
+
+		for (uint i = 0; i < Tris.Length; i++)
+		{
+			if (uv.x > Tris[i].BoundsMin.x && uv.x < Tris[i].BoundsMax.x && uv.y > Tris[i].BoundsMin.y && uv.y < Tris[i].BoundsMax.y)
+			{
+				u1 = Tris[i].UVa0; // get the original triangle UVs
+				u2 = Tris[i].UVa1;
+				u3 = Tris[i].UVa2;
+
+				// calculate triangle area - if zero, skip it
+				a = Tris[i].AreaPreCalc;  //precalculated to save on gpu perf.
+				if (a == 0)
+				{
+					continue;
+				}
+
+				// calculate barycentric coordinates of u1, u2 and u3
+				// if anyone is negative, point is outside the triangle: skip it
+				a1 = TriArea(u2, u3, uv) / a;
+				if (a1 < 0)
+				{
+					if (distToLineSeg2D(u2, u3, uv) > BleedSize)
+					{
+						continue;
+					}
+				}
+
+				a2 = TriArea(u3, u1, uv) / a;
+				if (a2 < 0)
+				{
+					if (distToLineSeg2D(u3, u1, uv) > BleedSize)
+					{
+						continue;
+					}
+				}
+
+				a3 = TriArea(u1, u2, uv) / a;
+				if (a3 < 0)
+				{
+					if (distToLineSeg2D(u1, u2, uv) > BleedSize)
+					{
+						continue;
+					}
+				}
+
+				float2 v1 = Tris[i].UVb0;
+				float2 v2 = Tris[i].UVb1;
+				float2 v3 = Tris[i].UVb2;
+
+				float2 uv2Location = (a1 * v1) + (a2 * v2) + (a3 * v3);
+
+				// Normal blend mode
+				float brushAlpha = BrushTex.SampleLevel(samplerBrushTex, uv2Location, 0).r;
+				
+				if (brushMaxValue < ((1.0f - brushAlpha) * BrushColor.a))
+				{
+					newBackground = originalBackground;
+					float alphaTex = AlphaTex[offsetID.xy].r;
+
+					newBackground /= alphaTex;
+
+					float4 alpha2 = alphaTex * brushAlpha;  // Integrate the brush so we can calculate the diffuse result simulating what the alpha result will really be
+					alpha2 = lerp(alphaTex, alpha2, BrushColor.a);  //brush transparency
+
+					newBackground *= alpha2;
+					newBackground.a = 1;
+
+					brushMaxValue = (1.0f - brushAlpha) * BrushColor.a;
+				}
+			}
+		}
+
+		BackgroundTex[offsetID.xy] = newBackground;
+		return;
+	}
+}

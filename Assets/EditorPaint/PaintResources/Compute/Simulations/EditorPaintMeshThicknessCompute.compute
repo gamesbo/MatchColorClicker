@@ -1,0 +1,343 @@
+﻿// Copyright 2018 Prized Goat
+// Prized Goat is a small indie group of friends, if this file was obtained without purchase,
+// please support our efforts by purchasing a copy from the Unity Asset Store.  Thanks
+
+#pragma kernel CSMain
+
+struct worldTriData
+{
+	float3 vert0;
+	float3 vert1;
+	float3 vert2;
+
+	float3 normal0;
+	float3 normal1;
+	float3 normal2;
+};
+
+struct worldObjectData
+{
+	float3 position;
+	float size;
+	float arrayStart;
+	float arrayEnd;
+};
+
+struct objTriData
+{
+	float3 vert0;
+	float3 vert1;
+	float3 vert2;
+	
+	float3 normal0;
+	float3 normal1;
+	float3 normal2;
+
+	float2 uv0;
+	float2 uv1;
+	float2 uv2;
+};
+
+// resolution
+int ResX;
+int ResY;
+float3 Ray;
+float RayCount;
+float MaxDist;
+float FOV;
+float3 idOffset;
+float2 uv;
+bool UseBothSides;
+bool InterpolateVerts;
+float Falloff;
+bool IncludeAllTriangles;
+StructuredBuffer<worldObjectData> WorldObjects;
+StructuredBuffer<worldTriData> WorldTris;
+StructuredBuffer<objTriData> ObjTris;
+RWTexture2D<float> AoTexture;
+
+StructuredBuffer<float> TimingBuffer;  // used as a low cost buffer which the cpu can request.  this lets us get timing data so we can predict and throttle submits before they have actually finished.
+
+float3 pixelPosition;
+float3 pixelVert0;
+float3 pixelVert1;
+float3 pixelVert2;
+float3 pixelNormal;
+
+// calculate signed triangle area using a kind of "2D cross product":
+float TriArea(float2 p1, float2 p2, float2 p3)
+{
+	float2 v1 = p1 - p3;
+	float2 v2 = p2 - p3;
+	return (v1.x * v2.y - v1.y * v2.x) / 2;
+}
+
+float distToLineSeg2D(float2 l1, float2 l2, float2 p)
+{
+	float2 ld = l1 - l2;
+	float2 pd = p - l2;
+
+	return length(pd - ld * clamp(dot(pd, ld) / dot(ld, ld), 0.0, 1.0));
+}
+
+float distanceToRay3D(float3 ray, float3 p)
+{
+	return length(cross(ray, p - pixelPosition));
+}
+
+float2 closestPointOnLine(float2 p0, float2 p1, float uv)
+{
+	float2 vector1 = uv - p0;
+	float2 vector2 = normalize(p1 - p0);
+
+	float d = length(p0 - p1);
+	float t = dot(vector2, vector1);
+
+	if (t <= 0)
+	{
+		return p0;
+	}
+
+	if (t >= d)
+	{
+		return p1;
+	}
+
+	float2 vector3 = vector2 * t;
+	float2 closestpoint = p0 + vector3;
+
+	return closestpoint;
+}
+
+bool checkIfPointInTriangle(float2 uv, float2 offsetID)
+{
+	bool inTriangle = false;
+
+	float2 u1;
+	float2 u2;
+	float2 u3;
+	float a;
+	float a1;
+	float a2;
+	float a3;
+
+	for (uint i = 0; i < ObjTris.Length; i++)
+	{
+		u1 = ObjTris[i].uv0; // get the triangle UVs
+		u2 = ObjTris[i].uv1;
+		u3 = ObjTris[i].uv2;
+
+		// calculate triangle area - if zero, skip it
+		a = TriArea(u1, u2, u3);
+		if (a == 0)
+		{
+			continue;
+		}
+
+		float2 onLineUV;
+
+		// calculate barycentric coordinates of u1, u2 and u3
+		// if anyone is negative, point is outside the triangle: skip it
+		a1 = TriArea(u2, u3, uv) / a;
+		if (a1 < 0)
+		{
+			continue;
+		}
+
+		a2 = TriArea(u3, u1, uv) / a;
+		if (a2 < 0)
+		{
+			continue;
+		}
+
+		a3 = TriArea(u1, u2, uv) / a;
+		if (a3 < 0)
+		{
+			continue;
+		}
+			
+		float3 n1 = ObjTris[i].normal0;
+		float3 n2 = ObjTris[i].normal1;
+		float3 n3 = ObjTris[i].normal2;
+		float3 normal;
+
+		// get the barycentric value or the center of triangle value
+		if (InterpolateVerts)
+		{
+			normal = (a1 * n1) + (a2 * n2) + (a3 * n3);
+		}
+		else
+		{
+			normal = (n1 + n2 + n3) / 3;
+		}
+		
+		// get the barycentric value
+		float3 p1 = ObjTris[i].vert0;
+		float3 p2 = ObjTris[i].vert1;
+		float3 p3 = ObjTris[i].vert2;
+		float3 position;
+
+		if (InterpolateVerts)
+		{
+			position = (a1 * p1) + (a2 * p2) + (a3 * p3);
+		}
+		else
+		{
+			position = (p1 + p2 + p3) / 3;
+		}
+
+		pixelNormal = -normalize(normal);  // invert the normal so that it looks into the mesh instead of outside the mesh
+		pixelPosition = position;
+
+		// store the vert values for use in the main function
+		pixelVert0 = p1;
+		pixelVert1 = p2;
+		pixelVert2 = p3;
+			
+		inTriangle = true;
+
+		i = ObjTris.Length;   //assumes the first valid value found is the only value we need to find.
+	}
+
+	return inTriangle;
+}
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+	// This offsets the render space to work with the tiled rendering
+	int3 offsetID = id + idOffset;
+
+	uv = float2((float)offsetID.x / ResX, (float)offsetID.y / ResY) + float2(0.5f / ResX, 0.5f / ResY);	  // UV + Half pixel offset to center the ray in the pixel
+
+	if(checkIfPointInTriangle(uv.xy, offsetID.xy))
+	{
+		float output = 1;
+		float minDist = 0.0001f;
+
+		float closestImpact = 10000;
+		float closestResult = 1;
+
+		// bias the 360deg rays to 180 deg
+		// this is a poor way of doing it, but it roughly works since we can accept a level of randomness in the rays.
+		Ray = lerp(pixelNormal, Ray, 0.5f * FOV);
+		Ray = normalize(Ray);
+
+		for (uint i = 0; i < WorldObjects.Length; i++)
+		{
+			uint j = 0;
+			uint startValue = 0;
+			uint endValue = 0;
+			bool objectFound = false;
+
+			if (IncludeAllTriangles)
+			{
+				startValue = 0;
+				endValue = WorldTris.Length;
+				objectFound = true;
+
+				i = WorldObjects.Length;
+			}
+			else
+			{
+				float foundDistance = distanceToRay3D(Ray, WorldObjects[i].position);
+				if (foundDistance <= WorldObjects[i].size)
+				{
+					startValue = WorldObjects[i].arrayStart;
+					endValue = WorldObjects[i].arrayEnd;
+					objectFound = true;
+				}
+			}
+
+			if (objectFound)
+			{
+				for (j = startValue; j < endValue; j++)
+				{
+					float3 vertA = WorldTris[j].vert0;
+					float3 vertB = WorldTris[j].vert1;
+					float3 vertC = WorldTris[j].vert2;
+
+					// The normal vector of the plane defined by the triangle
+					float3 norm = normalize(cross(vertB - vertA, vertC - vertA));
+
+					// The distance of the ray to an intersection with the plane
+					float d = dot(vertA - pixelPosition, norm) / dot(Ray, norm);
+
+					// The point in space were the ray intersects the infinite plane
+					float3 p = pixelPosition + d * Ray;
+
+					// Convert to barycentric coordinates
+					// This will find if the intersection is actually within the triangle
+					float triangleArea = dot(norm, cross(vertB - vertA, vertC - vertA));
+					if (triangleArea <= 0)
+					{
+						continue;
+					}
+
+					float baryA = dot(norm, cross(vertB - p, vertC - p)) / triangleArea;  // area check
+					if (baryA <= 0)
+					{
+						continue;
+					}
+
+					float baryB = dot(norm, cross(vertC - p, vertA - p)) / triangleArea;  // area check
+					if (baryB <= 0)
+					{
+						continue;
+					}
+
+					float baryC = dot(norm, cross(vertA - p, vertB - p)) / triangleArea;  // area check
+					if (baryC <= 0)
+					{
+						continue;
+					}
+
+					// Get the barycentric value
+					float3 p1 = WorldTris[j].normal0;
+					float3 p2 = WorldTris[j].normal1;
+					float3 p3 = WorldTris[j].normal2;
+					float3 impactNormal = (baryA * p1) + (baryB * p2) + (baryC * p3);
+					impactNormal = normalize(impactNormal);
+					// Is the ray and the normal facing the same direction
+					float impactFacing = dot(impactNormal, Ray);
+					float3 impactPosition = (baryA * vertA) + (baryB * vertB) + (baryC * vertC);
+
+					float impactDistance = (length(impactPosition - pixelPosition));
+					// validate its not the same triangle as the source triangle
+					if (impactDistance >= minDist)
+					{
+						//is the impact in front or behind the triangle facing direction
+						float impactReltativeDirection = dot(normalize(impactPosition - pixelPosition), Ray);
+
+						// Is the triangle far enough away and is the triangle in front of the pixel or behind the pixel
+						if (impactReltativeDirection > 0.01f)
+						{
+							if (impactDistance < closestImpact)
+							{
+								if (UseBothSides || impactFacing < 0)
+								{
+									closestImpact = impactDistance;
+
+									// normalize the distance to generate a clean gradient
+									float result = clamp(impactDistance, 0, MaxDist);
+									result /= MaxDist;
+
+									closestResult = result;
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// apply gamma to gradient
+		output = pow(abs(closestResult), 1.0f / Falloff);
+		
+		output = (1.0f - output) * RayCount;  // its actually 1.0f / raycount but we precalc the division on the cpu
+		
+		output = saturate(AoTexture[offsetID.xy] - output);
+		
+		AoTexture[offsetID.xy] = output;
+	}
+}

@@ -1,0 +1,23 @@
+﻿// Copyright 2018 Prized Goat
+// Prized Goat is a small indie group of friends, if this file was obtained without purchase,
+// please support our efforts by purchasing a copy from the Unity Asset Store.  Thanks
+
+#pragma kernel CSMain
+
+// Output diffuse
+RWTexture2D<float4> OutputTex;
+Texture2D<float4> AlphaTex;
+Texture2D<float4> DiffuseTex;
+float3 idOffset;
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID, uint3 Gid : SV_GroupID, uint3 GTid : SV_GroupThreadID, uint GI : SV_GroupIndex)
+{
+	//int3 offsetID = id;
+	int3 offsetID = id + idOffset;
+
+	float4 output = DiffuseTex[offsetID.xy];
+	output.a = AlphaTex[offsetID.xy].r;
+
+	OutputTex[offsetID.xy] = output;
+}

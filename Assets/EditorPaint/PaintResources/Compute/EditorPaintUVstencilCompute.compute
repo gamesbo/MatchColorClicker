@@ -1,0 +1,208 @@
+﻿// Copyright 2018 Prized Goat
+// Prized Goat is a small indie group of friends, if this file was obtained without purchase,
+// please support our efforts by purchasing a copy from the Unity Asset Store.  Thanks
+
+#pragma kernel CSMain
+
+struct objTriData
+{
+	float3 vert0;
+	float3 vert1;
+	float3 vert2;
+
+	float3 normal0;
+	float3 normal1;
+	float3 normal2;
+
+	float2 uv0;
+	float2 uv1;
+	float2 uv2;
+};
+
+// Image rez
+int ResX;
+int ResY;
+// Offset the thread id to allow rendering a subimage section
+float3 idOffset;
+// Output diffuse
+RWTexture2D<float4> RendTex;
+// Mesh triangle UVs
+StructuredBuffer<objTriData> Tris;
+
+// Calculate signed triangle area using a kind of "2D cross product":
+float TriArea(float2 p1, float2 p2, float2 p3)
+{
+	float2 v1 = p1 - p3;
+	float2 v2 = p2 - p3;
+	return (v1.x * v2.y - v1.y * v2.x) / 2;
+}
+
+float distToLineSeg2D(float2 l1, float2 l2, float2 p)
+{
+	float2 ld = l1 - l2;
+	float2 pd = p - l2;
+
+	return length(pd - ld * clamp(dot(pd, ld) / dot(ld, ld), 0.0, 1.0));
+}
+
+bool checkIfPointInTriangle(float2 id, float2 uv)
+{
+	float2 u1;
+	float2 u2;
+	float2 u3;
+	float a;
+	float a1;
+	float a2;
+	float a3;
+
+	bool inTriangle = false;
+
+	for (uint i = 0; i < Tris.Length; i++)
+	{
+		// get the triangle UVs
+		u1 = Tris[i].uv0;
+		u2 = Tris[i].uv1;
+		u3 = Tris[i].uv2;
+		// calculate triangle area - if zero, skip it
+		a = TriArea(u1, u2, u3);
+		if (a == 0)
+		{
+			continue;
+		}
+		// calculate barycentric coordinates of u1, u2 and u3
+		// if anyone is negative, point is outside the triangle: skip it
+		a1 = TriArea(u2, u3, uv) / a;
+		if (a1 < 0)
+		{
+			continue;
+		}
+
+		a2 = TriArea(u3, u1, uv) / a;
+		if (a2 < 0)
+		{
+			continue;
+		}
+
+		a3 = TriArea(u1, u2, uv) / a;
+		if (a3 < 0)
+		{
+			continue;
+		}
+
+		//get the barycentric value
+		float2 uv1Location = (a1 * u1) + (a2 * u2) + (a3 * u3);
+
+		inTriangle = true;
+
+		i = Tris.Length;   //assumes the first valid value found is the only value we need to find.
+	}
+
+	return inTriangle;
+}
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID, uint3 Gid : SV_GroupID, uint3 GTid : SV_GroupThreadID, uint GI : SV_GroupIndex)
+{
+	// This offsets the render space to work with the tiled rendering
+	int3 offsetID = id + idOffset;
+
+	// Plus a half pixel offset
+	float2 uv = float2((float)offsetID.x / ResX, (float)offsetID.y / ResY) + float2(0.5f / ResX, 0.5f / ResY);
+
+	bool inTriangle = false;
+	inTriangle = checkIfPointInTriangle(offsetID.xy, uv.xy);
+
+	float closestLineDist = 9999999999.0f;
+	int closestLine = 0;
+	float2 lineVector = float2(0, 0);
+	float sign = 0;
+	int lineNum = 0;
+	float lineDist = 0.0f;
+	float2 pixelOffset = float2(1.5f / ResX, 1.5f / ResY);
+
+	for (uint i = 0; i < Tris.Length; i++)
+	{
+		lineDist = distToLineSeg2D(Tris[i].uv0, Tris[i].uv1, uv);
+		lineDist = abs(lineDist);
+		if (lineDist < closestLineDist)
+		{
+			closestLineDist = lineDist;
+			closestLine = i;
+			lineVector = Tris[i].uv0 - Tris[i].uv1;
+			lineVector = float2(lineVector.y, -lineVector.x);
+			lineVector = normalize(lineVector) * pixelOffset;
+			lineNum = 1;
+		}
+
+		lineDist = distToLineSeg2D(Tris[i].uv1, Tris[i].uv2, uv);
+		lineDist = abs(lineDist);
+		if (lineDist < closestLineDist)
+		{
+			closestLineDist = lineDist;
+			closestLine = i;
+			lineVector = Tris[i].uv1 - Tris[i].uv2;
+			lineVector = float2(lineVector.y, -lineVector.x);
+			lineVector = normalize(lineVector) * pixelOffset;
+			lineNum = 2;
+		}
+
+		lineDist = distToLineSeg2D(Tris[i].uv2, Tris[i].uv0, uv);
+		lineDist = abs(lineDist);
+		if (lineDist < closestLineDist)
+		{
+			closestLineDist = lineDist;
+			closestLine = i;
+			lineVector = Tris[i].uv2 - Tris[i].uv0;
+			lineVector = float2(lineVector.y, -lineVector.x);
+			lineVector = normalize(lineVector) * pixelOffset;
+			lineNum = 3;
+		}
+	}
+
+	if (!inTriangle || closestLineDist < (1.0f / ResX))
+	{
+		if (lineNum == 1)
+		{
+			float distanceToPoint = length(Tris[closestLine].uv0 - uv);
+			float lineLength = length(Tris[closestLine].uv0 - Tris[closestLine].uv1);
+			//c2-a2=b2
+			float distanceOnLine = saturate(sqrt((distanceToPoint * distanceToPoint) - (closestLineDist * closestLineDist)) / lineLength);
+
+			float2 newUV = lerp(Tris[closestLine].uv0, Tris[closestLine].uv1, distanceOnLine);
+
+			newUV = newUV - lineVector;
+
+			RendTex[offsetID.xy] = float4(closestLineDist * 10, 0, 0, 1);
+		}
+		else if (lineNum == 2)
+		{
+			float distanceToPoint = length(Tris[closestLine].uv1 - uv);
+			float lineLength = length(Tris[closestLine].uv1 - Tris[closestLine].uv2);
+			//c2-a2=b2
+			float distanceOnLine = saturate(sqrt((distanceToPoint * distanceToPoint) - (closestLineDist * closestLineDist)) / lineLength);
+
+			float2 newUV = lerp(Tris[closestLine].uv1, Tris[closestLine].uv2, distanceOnLine);
+
+			newUV = newUV - lineVector;
+
+			RendTex[offsetID.xy] = float4(closestLineDist * 10, 0, 0, 1);
+		}
+		else if (lineNum == 3)
+		{
+			float distanceToPoint = length(Tris[closestLine].uv2 - uv);
+			float lineLength = length(Tris[closestLine].uv2 - Tris[closestLine].uv0);
+			//c2-a2=b2
+			float distanceOnLine = saturate(sqrt((distanceToPoint * distanceToPoint) - (closestLineDist * closestLineDist)) / lineLength);
+
+			float2 newUV = lerp(Tris[closestLine].uv2, Tris[closestLine].uv0, distanceOnLine);
+
+			newUV = newUV - lineVector;
+
+			RendTex[offsetID.xy] = float4(closestLineDist * 10, 0, 0, 1);
+		}
+	}
+	else
+	{
+		RendTex[id.xy] = float4(0, 0, 0, 1);
+	}
+}

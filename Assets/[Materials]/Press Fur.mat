@@ -76,7 +76,7 @@ Material:
     - _FurHardness: 1
     - _FurLength: 1
     - _FurShading: 0.153
-    - _FurThinness: 2
+    - _FurThinness: 10
     - _GlossMapScale: 1
     - _Glossiness: 0.5
     - _GlossyReflections: 1
@@ -85,7 +85,7 @@ Material:
     - _OcclusionStrength: 1
     - _Parallax: 0.02
     - _Reflection: 0
-    - _RimPower: 4
+    - _RimPower: 6
     - _Shininess: 0.01
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
@@ -98,7 +98,7 @@ Material:
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _ForceGlobal: {r: 0, g: 0, b: 0, a: 0}
     - _ForceLocal: {r: 0, g: 0, b: 0, a: 0}
-    - _RimColor: {r: 0.1981132, g: 0.1981132, b: 0.1981132, a: 1}
+    - _RimColor: {r: 0.9150943, g: 0.9150943, b: 0.9150943, a: 1}
     - _SpecColor: {r: 1, g: 1, b: 1, a: 1}
     - _Specular: {r: 0.4245283, g: 0.36320198, b: 0.35444108, a: 1}
   m_BuildTextureStacks: []

@@ -1,0 +1,25 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 1525566691, guid: 6cf63a1c26fc89e45bc04fd7281530a0, type: 3}
+  m_Name: EditorPaintUserSettings
+  m_EditorClassIdentifier: 
+  version: 2
+  CameraPreviewBackgroundColor: {r: 0.275, g: 0.275, b: 0.275, a: 1}
+  CameraRotationSpeed: 0.25
+  CameraPanningSpeed: 0.0025
+  CameraZoomingSpeed: 0.025
+  CameraDefaultRotation: {x: 0.19134171, y: 0.19134171, z: -0.038060233, w: 0.9619397}
+  AutoCreateStandardShaders: 1
+  AutoCreateAllShaders: 0
+  ShowSimSpeedDialog: 1
+  AlwaysUseSlowSimSpeed: 0
+  StrokePaintNormalizedOverlap: 0.8

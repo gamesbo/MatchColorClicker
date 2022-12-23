@@ -1,0 +1,28 @@
+﻿// Copyright 2018 Prized Goat
+// Prized Goat is a small indie group of friends, if this file was obtained without purchase,
+// please support our efforts by purchasing a copy from the Unity Asset Store.  Thanks
+
+#pragma kernel CSMain
+
+int resX;
+int resY;
+RWTexture2D<float4> rendTex;
+
+float random(float2 p)
+{
+	const float2 r = float2(23.1406926327792690, 2.6651441426902251);
+	return saturate(frac(cos(fmod(123456789., 1e-7 + 256. * dot(p, r)))));
+}
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID, uint3 Gid : SV_GroupID, uint3 GTid : SV_GroupThreadID, uint GI : SV_GroupIndex)
+{
+	float2 uv = float2((float)id.x / resX, (float)id.y / resY) + float2(0.5f / resX, 0.5f / resY);
+
+	float noise = (random(uv) - 0.5f);
+	noise = clamp(noise, -0.5f, 0.5f);
+
+	float3 color = float3(uv + noise, 0);
+
+	rendTex[id.xy] = float4(color, rendTex[id.xy].a * 0.5f);
+}

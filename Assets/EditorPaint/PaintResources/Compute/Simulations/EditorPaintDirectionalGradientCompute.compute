@@ -1,0 +1,152 @@
+﻿// Copyright 2018 Prized Goat
+// Prized Goat is a small indie group of friends, if this file was obtained without purchase,
+// please support our efforts by purchasing a copy from the Unity Asset Store.  Thanks
+
+#pragma kernel CSMain
+
+// This uses the "full" version of the triangle struct
+struct Triangle
+{
+	float2 UVa0;
+	float2 UVa1;
+	float2 UVa2;
+
+	float2 UVb0;
+	float2 UVb1;
+	float2 UVb2;
+
+	float3 VertPos1;
+	float3 VertPos2;
+	float3 VertPos3;
+
+	float3 VertNormal1;
+	float3 VertNormal2;
+	float3 VertNormal3;
+
+	float4 VertTangent1;
+	float4 VertTangent2;
+	float4 VertTangent3;
+};
+
+int resX;
+int resY;
+float3 inputDirection;
+float3 inputColor1;
+float3 inputColor2;
+float gradientPow;
+bool useNormalMap;
+float3 idOffset;
+Texture2D<float4> normalMap;
+SamplerState samplernormalMap;
+RWTexture2D<float4> rendTex;
+const StructuredBuffer<Triangle> tris;
+
+StructuredBuffer<float> TimingBuffer;  // used as a low cost buffer which the cpu can request.  this lets us get timing data so we can predict and throttle submits before they have actually finished.
+
+// Calculate signed triangle area using a kind of "2D cross product":
+float TriArea(float2 p1, float2 p2, float2 p3)
+{
+	float2 v1 = p1 - p3;
+	float2 v2 = p2 - p3;
+	return (v1.x * v2.y - v1.y * v2.x) / 2;
+}
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID, uint3 Gid : SV_GroupID, uint3 GTid : SV_GroupThreadID, uint GI : SV_GroupIndex)
+{
+	// This offsets the render space to work with the tiled rendering
+	int3 offsetID = id + idOffset;
+
+	rendTex[offsetID.xy] = float4(0.5f, 0.5f, 0.5f, 1);
+
+	float2 uv = float2((float)offsetID.x / resX, (float)offsetID.y / resY) + float2(0.5f / resX, 0.5f / resY);
+
+	float2 u1;
+	float2 u2;
+	float2 u3;
+
+	float a;
+	float a1;
+	float a2;
+	float a3;
+
+	float3 v1;
+	float3 v2;
+	float3 v3;
+
+	float4 t1;
+	float4 t2;
+	float4 t3;
+
+	float3 pixelWorldNormal;
+	float4 pixelWorldTangent;
+	float output;
+
+	for (uint i = 0; i < tris.Length; i++)
+	{
+		u1 = tris[i].UVa0; // get the triangle UVs
+		u2 = tris[i].UVa1;
+		u3 = tris[i].UVa2;
+
+		// calculate triangle area - if zero, skip it
+		a = TriArea(u1, u2, u3);
+		if (a == 0)
+		{
+			continue;
+		}
+
+		// calculate barycentric coordinates of u1, u2 and u3
+		// if anyone is negative, point is outside the triangle: skip it
+		a1 = TriArea(u2, u3, uv) / a;
+		if (a1 < 0)
+		{
+			continue;
+		}
+
+		a2 = TriArea(u3, u1, uv) / a;
+		if (a2 < 0)
+		{
+			continue;
+		}
+
+		a3 = TriArea(u1, u2, uv) / a;
+		if (a3 < 0)
+		{
+			continue;
+		}
+
+		v1 = tris[i].VertNormal1;
+		v2 = tris[i].VertNormal2;
+		v3 = tris[i].VertNormal3;
+		pixelWorldNormal = (a1 * v1) + (a2 * v2) + (a3 * v3);
+
+		if (useNormalMap)
+		{
+			t1 = tris[i].VertTangent1;
+			t2 = tris[i].VertTangent2;
+			t3 = tris[i].VertTangent3;
+			pixelWorldTangent = (a1 * t1) + (a2 * t2) + (a3 * t3);
+
+			// Get the normal map texture
+			float3 normalTex = normalMap.SampleLevel(samplernormalMap, uv, 0).rgb;
+			normalTex.g = 1.0f - normalTex.g;
+			normalTex = (normalTex * 2) - 1;
+
+			// Generate the vertex world matrix
+			float3 normal = pixelWorldNormal;
+			float3 tangent = pixelWorldTangent.xyz;
+			float3 binormal = cross(normal, tangent);
+			float3x3 TBN = float3x3(tangent, binormal, normal);
+			
+			// Modify the world normal by the normal map
+			pixelWorldNormal = mul(normalTex, TBN);
+		}
+
+		output = pow(abs((dot(inputDirection, pixelWorldNormal) + 1) * 0.5f), gradientPow);
+		float3 outputColor = lerp(inputColor1, inputColor2, output);
+
+		rendTex[offsetID.xy] = float4(outputColor, 1);
+
+		i = tris.Length;   // Assumes the first valid value found is the only value we need to find.
+	}
+}

@@ -1,0 +1,151 @@
+﻿// Copyright 2018 Prized Goat
+// Prized Goat is a small indie group of friends, if this file was obtained without purchase,
+// please support our efforts by purchasing a copy from the Unity Asset Store.  Thanks
+
+#pragma kernel CSMain
+
+struct Triangle
+{
+	float2 UVa0;
+	float2 UVa1;
+	float2 UVa2;
+
+	float3 VertPos1;
+	float3 VertPos2;
+	float3 VertPos3;
+
+	float3 VertNormal1;
+	float3 VertNormal2;
+	float3 VertNormal3;
+};
+
+int resX;
+int resY;
+float GridX;
+float GridY;
+float GridZ;
+float OffsetX;
+float OffsetY;
+float OffsetZ;
+float LineWidth;
+float LineHardness;
+bool IntersectLines;
+float3 idOffset;
+RWTexture2D<float4> rendTex;
+const StructuredBuffer<Triangle> Tris;
+
+StructuredBuffer<float> TimingBuffer;  // used as a low cost buffer which the cpu can request.  this lets us get timing data so we can predict and throttle submits before they have actually finished.
+
+// Calculate signed triangle area using a kind of "2D cross product":
+float TriArea(float2 p1, float2 p2, float2 p3)
+{
+	float2 v1 = p1 - p3;
+	float2 v2 = p2 - p3;
+	return (v1.x * v2.y - v1.y * v2.x) / 2;
+}
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID, uint3 Gid : SV_GroupID, uint3 GTid : SV_GroupThreadID, uint GI : SV_GroupIndex)
+{
+	// This offsets the render space to work with the tiled rendering
+	int3 offsetID = id + idOffset;
+
+	rendTex[offsetID.xy] = float4(1, 1, 1, 1);
+
+	float2 uv = float2((float)offsetID.x / resX, (float)offsetID.y / resY) + float2(0.5f / resX, 0.5f / resY);
+
+	float2 u1;
+	float2 u2;
+	float2 u3;
+
+	float a;
+	float a1;
+	float a2;
+	float a3;
+
+	float3 v1;
+	float3 v2;
+	float3 v3;
+
+	float3 pixelWorldPos;
+	float output;
+
+	for (uint i = 0; i < Tris.Length; i++)
+	{
+		u1 = Tris[i].UVa0; // get the triangle UVs
+		u2 = Tris[i].UVa1;
+		u3 = Tris[i].UVa2;
+
+		// calculate triangle area - if zero, skip it
+		a = TriArea(u1, u2, u3);
+		if (a == 0)
+		{
+			continue;
+		}
+
+		// calculate barycentric coordinates of u1, u2 and u3
+		// if anyone is negative, point is outside the triangle: skip it
+		a1 = TriArea(u2, u3, uv) / a;
+		if (a1 < 0)
+		{
+			continue;
+		}
+
+		a2 = TriArea(u3, u1, uv) / a;
+		if (a2 < 0)
+		{
+			continue;
+		}
+
+		a3 = TriArea(u1, u2, uv) / a;
+		if (a3 < 0)
+		{
+			continue;
+		}
+
+		v1 = Tris[i].VertPos1;
+		v2 = Tris[i].VertPos2;
+		v3 = Tris[i].VertPos3;
+		pixelWorldPos = (a1 * v1) + (a2 * v2) + (a3 * v3);
+
+		pixelWorldPos = (pixelWorldPos) * float3(GridX, GridY, GridZ) + float3(OffsetX, OffsetY, OffsetZ);
+
+		float x = 0;
+		float y = 0;
+		float z = 0;
+
+		if (GridX > 0)
+		{
+			x = saturate(saturate(abs(frac(abs(pixelWorldPos.x)) - 0.5f) * 2) + LineWidth);
+			x = saturate(pow(x, LineHardness));
+		}
+
+		if (GridY > 0)
+		{
+			y = saturate(saturate(abs(frac(abs(pixelWorldPos.y)) - 0.5f) * 2) + LineWidth);
+			y = saturate(pow(y, LineHardness));
+		}
+
+		if (GridZ > 0)
+		{
+			z = saturate(saturate(abs(frac(abs(pixelWorldPos.z)) - 0.5f) * 2) + LineWidth);
+			z = saturate(pow(z, LineHardness));
+		}
+
+		output = saturate(abs(x + y + z));
+
+		if (output == 1 && IntersectLines)
+		{
+			x = x * 3 - 2;
+			y = y * 3 - 2;
+			z = z * 3 - 2;
+			output = saturate(abs(x + y + z));
+		}
+
+		output = 1.0f - output;
+
+		rendTex[offsetID.xy] = float4(output, output, output, 1);
+
+		i = Tris.Length;   // Assumes the first valid value found is the only value we need to find.
+	}
+}

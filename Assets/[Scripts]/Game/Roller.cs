@@ -16,7 +16,7 @@ public class Roller : MonoBehaviour
         onPlay = true;
         if (!middleRotate)
         {
-            Scale();
+            //Scale();
         }
     }
     public void Scale()
@@ -28,7 +28,7 @@ public class Roller : MonoBehaviour
         if (transform.localScale.z > 0.55f) return;
         LevelContainer.instance.PaintObj.DOLocalMove(new Vector3(LevelContainer.instance.PaintObj.localPosition.x + 0.11f,-0.59f, 0), 1.1f);
         LevelContainer.instance.PaintObj.GetComponent<PaintIn3D.P3dPaintDecal>().Scale = new Vector3(LevelContainer.instance.PaintObj.GetComponent<PaintIn3D.P3dPaintDecal>().Scale.x,
-            LevelContainer.instance.PaintObj.GetComponent<PaintIn3D.P3dPaintDecal>().Scale.y + 0.28f,
+            LevelContainer.instance.PaintObj.GetComponent<PaintIn3D.P3dPaintDecal>().Scale.y + 0.265f,
             LevelContainer.instance.PaintObj.GetComponent<PaintIn3D.P3dPaintDecal>().Scale.z);
         transform.DOScale(new Vector3(transform.localScale.x, transform.localScale.y, transform.localScale.z + 0.01f), 1.1f).OnComplete(()=> { Scale(); });
     }
@@ -38,11 +38,11 @@ public class Roller : MonoBehaviour
         {
             if (middleRotate)
             {
-                transform.Rotate(-1 * Vector3.down * Time.deltaTime * middleSpeed);
+                transform.Rotate(-1 * Vector3.down * Time.deltaTime * TapManager.instance.speed);
             }
             else
             {
-                transform.Rotate(-1 * Vector3.forward * Time.deltaTime * speed);
+                transform.Rotate(-1 * Vector3.forward * Time.deltaTime * (TapManager.instance.speed *3f));
             }
         }
     }

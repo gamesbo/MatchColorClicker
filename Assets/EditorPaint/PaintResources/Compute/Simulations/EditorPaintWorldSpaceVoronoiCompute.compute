@@ -1,0 +1,388 @@
+﻿// Copyright 2018 Prized Goat
+// Prized Goat is a small indie group of friends, if this file was obtained without purchase,
+// please support our efforts by purchasing a copy from the Unity Asset Store.  Thanks
+
+#pragma kernel CSMain
+
+struct Triangle
+{
+	float2 UVa0;
+	float2 UVa1;
+	float2 UVa2;
+
+	float3 VertPos1;
+	float3 VertPos2;
+	float3 VertPos3;
+
+	float3 VertNormal1;
+	float3 VertNormal2;
+	float3 VertNormal3;
+};
+
+int resX;
+int resY;
+float NoiseSize;
+float Randomness;
+float3 Offset;
+float3 Scale;
+bool ThreeDimensional;
+bool RenderDistanceToEdge;
+bool RenderSolidColors;
+float3 idOffset;
+RWTexture2D<float4> rendTex;
+const StructuredBuffer<Triangle> tris;
+
+StructuredBuffer<float> TimingBuffer;  // used as a low cost buffer which the cpu can request.  this lets us get timing data so we can predict and throttle submits before they have actually finished.
+
+// Calculate signed triangle area using a kind of "2D cross product":
+float TriArea(float2 p1, float2 p2, float2 p3)
+{
+	float2 v1 = p1 - p3;
+	float2 v2 = p2 - p3;
+	return (v1.x * v2.y - v1.y * v2.x) / 2;
+}
+
+float3 rand3(float3 pos)
+{
+	float3 newPos = float3(dot(pos, float3(127.1f, 311.7f, 269.5f)),
+						dot(pos, float3(269.5f, 183.3f, 419.2f)),
+						dot(pos, float3(419.2f, 371.9f, 127.1f)));
+	return frac(sin(newPos) * 23758.5453f);
+}
+
+float2 rand2(float2 pos)
+{
+	float2 newPos = float2(dot(pos, float2(127.1f, 311.7f)),
+					dot(pos, float2(269.5f, 183.3f)));
+	return frac(sin(newPos) * 43758.5453f);
+}
+
+float rand(float2 pos)
+{
+	return frac(sin(dot(pos, float2(419.2f, 371.9f))) * 833458.57832f);
+}
+
+float VoronoiSolid3D(float3 wPos, float irregular, float3 offset, float3 scale)
+{
+	float3 cell = floor(scale * (wPos + offset));
+	float3 cellOffset = frac(scale * (wPos + offset));
+	float valueAccumulation = 0;
+	float distanceAccumulation = 0;
+
+	for (int x = -2; x <= 2; x++)
+	{
+		for (int y = -2; y <= 2; y++)
+		{
+			for (int z = -2; z <= 2; z++)
+			{
+				float3 samplePos = float3(x, y, z);
+				float3 randomCenter = rand3(cell + samplePos) * irregular;
+
+				float centerDistance = length(samplePos - cellOffset + randomCenter);
+				float cellSample = pow(abs(1.0 - smoothstep(0.0, 1.414, centerDistance)), 64);  // 64 can be changed to alter the "softness"
+				float color = rand3(cell + samplePos).x;
+
+				valueAccumulation += color * cellSample;
+				distanceAccumulation += cellSample;
+			}
+		}
+	}
+
+	return valueAccumulation / distanceAccumulation;
+}
+
+float Voronoi3D(float3 wPos, float irregular, float3 offset, float3 scale)
+{
+	float3 cell = floor(scale * (wPos + offset));
+	float3 cellOffset = frac(scale * (wPos + offset));
+	float3 vectorToCenter = 0;
+	float3 vectorToRandomCenter = 0;
+	float closestDistance = 10;
+
+	for (int x = -2; x <= 2; x++)
+	{
+		for (int y = -2; y <= 2; y++)
+		{
+			for (int z = -2; z <= 2; z++)
+			{
+				float3 samplePos = float3(x, y, z);
+				float3 randomCenter = rand3(cell + samplePos) * irregular;
+				float3 vectorToTest = samplePos - cellOffset + randomCenter;
+				float distance = dot(vectorToTest, vectorToTest);
+				
+				if (distance < closestDistance)
+				{
+					closestDistance = distance;
+					vectorToRandomCenter = vectorToTest;
+					vectorToCenter = samplePos;
+				}
+			}
+		}
+	}
+
+	return 1.0f - closestDistance;
+}
+
+float VoronoiSolid2D(float2 uvPos, float irregular, float3 offset, float3 scale)
+{
+	float2 cell = floor(scale.xy * (uvPos + offset.xy));
+	float2 cellOffset = frac(scale.xy * (uvPos + offset.xy));
+	float valueAccumulation = 0;
+	float distanceAccumulation = 0;
+
+	for (int x = -2; x <= 2; x++)
+	{
+		for (int y = -2; y <= 2; y++)
+		{
+			float2 samplePos = float2(x, y);
+			float2 randomCenter = rand2(cell + samplePos) * irregular;
+
+			float centerDistance = length(samplePos - cellOffset + randomCenter);
+			float cellSample = pow(abs(1.0 - smoothstep(0.0, 1.414, centerDistance)), 64);  // 64 can be changed to alter the "softness"
+			float color = rand(cell + samplePos);
+			valueAccumulation += color * cellSample;
+			distanceAccumulation += cellSample;
+		}
+	}
+
+	return valueAccumulation / distanceAccumulation;
+}
+
+float Voronoi2D(float2 uvPos, float irregular, float3 offset, float3 scale)
+{
+	float2 cell = floor(scale.xy * (uvPos + offset.xy));
+	float2 cellOffset = frac(scale.xy * (uvPos + offset.xy));
+	float closestValue = 10;
+	float valueAccumulation = 0;
+	float distanceAccumulation;
+
+	for (int x = -2; x <= 2; x++)
+	{
+		for (int y = -2; y <= 2; y++)
+		{
+			float2 samplePos = float2(x, y);
+			float2 randomCenter = rand2(cell + samplePos) * irregular;
+
+			float2 vectorToTest = samplePos + randomCenter - cellOffset;
+			float distance = dot(vectorToTest, vectorToTest);
+
+			closestValue = min(closestValue, distance);
+		}
+	}
+
+	return 1.0f - closestValue;
+}
+
+float DistanceToEdge3D(float3 wPos, float irregular, float3 offset, float3 scale)
+{
+	float3 cell = floor(scale * (wPos + offset));
+	float3 cellOffset = frac(scale * (wPos + offset));
+	float3 vectorToCenter = 0;
+	float3 vectorToRandomCenter = 0;
+	float closestDistance = 10;
+
+	for (int x = -2; x <= 2; x++)
+	{
+		for (int y = -2; y <= 2; y++)
+		{
+			for (int z = -2; z <= 2; z++)
+			{
+				float3 samplePos = float3(x, y, z);
+				float3 randomCenter = rand3(cell + samplePos) * irregular;
+				float3 vectorToTest = samplePos - cellOffset + randomCenter;
+				float distance = dot(vectorToTest, vectorToTest);
+
+				if (distance < closestDistance)
+				{
+					closestDistance = distance;
+					vectorToRandomCenter = vectorToTest;
+					vectorToCenter = samplePos;
+				}
+			}
+		}
+	}
+
+	// Signed Distance
+	closestDistance = 10;
+	for (int x2 = -2; x2 <= 2; x2++)
+	{
+		for (int y = -2; y <= 2; y++)
+		{
+			for (int z = -2; z <= 2; z++)
+			{
+				float3 samplePos = vectorToCenter + float3(x2, y, z);
+				float3 randomCenter = rand3(cell + samplePos) * irregular;
+
+				float3 vectorToTest = samplePos + randomCenter - cellOffset;
+
+				if (dot(vectorToRandomCenter - vectorToTest, vectorToRandomCenter - vectorToTest) > 0.001f)
+				{
+					closestDistance = min(closestDistance, dot(0.5f * (vectorToRandomCenter + vectorToTest), normalize(vectorToTest - vectorToRandomCenter)));
+				}
+			}
+		}
+	}
+
+	return closestDistance;
+}
+
+
+float DistanceToEdge2D(float2 uvPos, float irregular, float3 offset, float3 scale)
+{
+	float2 cell = floor(scale.xy * (uvPos + offset.xy));
+	float2 cellOffset = frac(scale.xy * (uvPos + offset.xy));
+	float2 vectorToCenter = 0;
+	float2 vectorToRandomCenter = 0;
+	float closestDistance = 10;
+
+	// Voronoi
+	for (int x = -2; x <= 2; x++)
+	{
+		for (int y = -2; y <= 2; y++)
+		{
+			float2 samplePos = float2(x, y);
+			float2 randomCenter = rand2(cell + samplePos) * irregular;
+
+			float2 vectorToTest = samplePos + randomCenter - cellOffset;
+			float distance = dot(vectorToTest, vectorToTest);
+
+			if (distance < closestDistance)
+			{
+				closestDistance = distance;
+				vectorToRandomCenter = vectorToTest;
+				vectorToCenter = samplePos;
+			}
+		}
+	}
+
+	// Signed Distance
+	closestDistance = 10;
+	for (int x2 = -2; x2 <= 2; x2++)
+	{
+		for (int y = -2; y <= 2; y++)
+		{
+			float2 samplePos = vectorToCenter + float2(x2, y);
+			float2 randomCenter = rand2(cell + samplePos) * irregular;
+
+			float2 vectorToTest = samplePos + randomCenter - cellOffset;
+
+			if (dot(vectorToRandomCenter - vectorToTest, vectorToRandomCenter - vectorToTest) > 0.001f)
+			{
+				closestDistance = min(closestDistance, dot(0.5f * (vectorToRandomCenter + vectorToTest), normalize(vectorToTest - vectorToRandomCenter)));
+			}
+		}
+	}
+
+	return closestDistance;
+}
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID, uint3 Gid : SV_GroupID, uint3 GTid : SV_GroupThreadID, uint GI : SV_GroupIndex)
+{
+	// This offsets the render space to work with the tiled rendering
+	int3 offsetID = id + idOffset;
+
+	rendTex[offsetID.xy] = float4(0.5f, 0.5f, 0.5f, 1);
+
+	float2 uv = float2((float)offsetID.x / resX, (float)offsetID.y / resY) + float2(0.5f / resX, 0.5f / resY);
+
+	float2 u1;
+	float2 u2;
+	float2 u3;
+
+	float a;
+	float a1;
+	float a2;
+	float a3;
+
+	float3 v1;
+	float3 v2;
+	float3 v3;
+
+	float3 pixelWorldPos;
+	float output;
+
+	for (uint i = 0; i < tris.Length; i++)
+	{
+		u1 = tris[i].UVa0; // get the triangle UVs
+		u2 = tris[i].UVa1;
+		u3 = tris[i].UVa2;
+
+		// calculate triangle area - if zero, skip it
+		a = TriArea(u1, u2, u3);
+		if (a == 0)
+		{
+			continue;
+		}
+
+		// calculate barycentric coordinates of u1, u2 and u3
+		// if anyone is negative, point is outside the triangle: skip it
+		a1 = TriArea(u2, u3, uv) / a;
+		if (a1 < 0)
+		{
+			continue;
+		}
+
+		a2 = TriArea(u3, u1, uv) / a;
+		if (a2 < 0)
+		{
+			continue;
+		}
+
+		a3 = TriArea(u1, u2, uv) / a;
+		if (a3 < 0)
+		{
+			continue;
+		}
+
+		v1 = tris[i].VertPos1;
+		v2 = tris[i].VertPos2;
+		v3 = tris[i].VertPos3;
+		pixelWorldPos = (a1 * v1) + (a2 * v2) + (a3 * v3);
+		
+		if (ThreeDimensional)
+		{
+			float noiseSize = (1.0f / NoiseSize);
+
+			if (RenderDistanceToEdge)
+			{
+				output = DistanceToEdge3D(noiseSize * pixelWorldPos, Randomness, Offset, Scale);
+			}
+			else
+			{
+				if (RenderSolidColors)
+				{
+					output = VoronoiSolid3D(noiseSize * pixelWorldPos, Randomness, Offset, Scale);
+				}
+				else
+				{
+					output = Voronoi3D(noiseSize * pixelWorldPos, Randomness, Offset, Scale);
+				}
+			}
+		}
+		else
+		{
+			float noiseSize = (10.0f / NoiseSize);
+
+			if (RenderDistanceToEdge)
+			{
+				output = DistanceToEdge2D(noiseSize * uv, Randomness, Offset, Scale);
+			}
+			else
+			{
+				if (RenderSolidColors)
+				{
+					output = VoronoiSolid2D(noiseSize * uv, Randomness, Offset, Scale);
+				}
+				else
+				{
+					output = Voronoi2D(noiseSize * uv, Randomness, Offset, Scale);
+				}
+			}
+		}
+
+		rendTex[offsetID.xy] = float4(output, output, output,1);
+
+		i = tris.Length;   //assumes the first valid value found is the only value we need to find.
+	}
+}

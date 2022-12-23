@@ -1,0 +1,160 @@
+﻿// Copyright 2018 Prized Goat
+// Prized Goat is a small indie group of friends, if this file was obtained without purchase,
+// please support our efforts by purchasing a copy from the Unity Asset Store.  Thanks
+
+#pragma kernel CSMainRect
+
+struct Triangle
+{
+	float2 UVa0;
+	float2 UVa1;
+	float2 UVa2;
+
+	float2 UVb0;
+	float2 UVb1;
+	float2 UVb2;
+
+	float AreaPreCalc;
+	float2 BoundsMin;
+	float2 BoundsMax;
+
+	float Vert1Depth;
+	float Vert2Depth;
+	float Vert3Depth;
+};
+
+int ResX;
+int ResY;
+float BleedSize;
+const StructuredBuffer<Triangle> Tris;
+RWStructuredBuffer<uint> CompositeRect;
+float4 BrushColor;
+float3 idOffset;
+int BrushBlendMode;
+
+// calculate signed triangle area using a kind of "2D cross product":
+float TriArea(float2 p1, float2 p2, float2 p3)
+{
+	float2 v1 = p1 - p3;
+	float2 v2 = p2 - p3;
+	return (v1.x * v2.y - v1.y * v2.x) / 2;
+}
+
+float signedToLine2D(float2 v1, float2 v2, float2 p)
+{
+	float2 ld = v1 - v2;
+	float2 pd = p - v2;
+	return abs(sign(ld.x * pd.y - ld.y * pd.x));
+}
+
+float distToLineSeg2D(float2 l1, float2 l2, float2 p)
+{
+	float2 ld = l1 - l2;
+	float2 pd = p - l2;
+
+	return length(pd - ld * clamp(dot(pd, ld) / dot(ld, ld), 0.0, 1.0));
+}
+
+[numthreads(8, 8, 1)]
+void CSMainRect(uint3 id : SV_DispatchThreadID, uint3 Gid : SV_GroupID, uint3 GTid : SV_GroupThreadID, uint GI : SV_GroupIndex)
+{
+	int3 offsetID = id + idOffset;
+
+	float2 uv = float2((float)offsetID.x / ResX, (float)offsetID.y / ResY) + float2(0.5f / ResX, 0.5f / ResY);
+
+	{
+		float2 u1;
+		float2 u2;
+		float2 u3;
+		float a;
+		float a1;
+		float a2;
+		float a3;
+
+		for (uint i = 0; i < Tris.Length; i++)
+		{
+			if (uv.x > Tris[i].BoundsMin.x && uv.x < Tris[i].BoundsMax.x && uv.y > Tris[i].BoundsMin.y && uv.y < Tris[i].BoundsMax.y)
+			{
+				u1 = Tris[i].UVa0; // get the original triangle UVs
+				u2 = Tris[i].UVa1;
+				u3 = Tris[i].UVa2;
+
+				// calculate triangle area - if zero, skip it
+				a = Tris[i].AreaPreCalc;  //precalculated to save on gpu perf.
+				if (a == 0)
+				{
+					continue;
+				}
+
+				// calculate barycentric coordinates of u1, u2 and u3
+				// if anyone is negative, point is outside the triangle: skip it
+				a1 = TriArea(u2, u3, uv) / a;
+				if (a1 < 0)
+				{
+					if (distToLineSeg2D(u2, u3, uv) > BleedSize)
+					{
+						continue;
+					}
+				}
+
+				a2 = TriArea(u3, u1, uv) / a;
+				if (a2 < 0)
+				{
+					if (distToLineSeg2D(u3, u1, uv) > BleedSize)
+					{
+						continue;
+					}
+				}
+
+				a3 = TriArea(u1, u2, uv) / a;
+				if (a3 < 0)
+				{
+					if (distToLineSeg2D(u1, u2, uv) > BleedSize)
+					{
+						continue;
+					}
+				}
+
+				float2 v1 = Tris[i].UVb0;
+				float2 v2 = Tris[i].UVb1;
+				float2 v3 = Tris[i].UVb2;
+
+				float2 uv2Location = (a1 * v1) + (a2 * v2) + (a3 * v3);
+
+				// is it faster with this if statement removed and just always run the min/max?
+				if ((uv2Location.x) >= 0 && (uv2Location.x) <= 1 && (uv2Location.y) >= 0 && (uv2Location.y) <= 1)
+				{
+					float2 uv1Location = (a1 * u1) + (a2 * u2) + (a3 * u3);
+
+					// check if tested triangle is inverted.
+					// this is done after all of the above so we can determin if its inside of the triangle.
+					// if the pixel is outside of the triangle, dont draw anything.
+					if (sign(a) == -1)
+					{
+						//xMin
+						InterlockedMin(CompositeRect[0], (uint)(Tris[i].BoundsMin.x * 8192)); // convert from uv float to maximum int range
+						//yMin
+						InterlockedMin(CompositeRect[1], (uint)(Tris[i].BoundsMin.y * 8192));
+						//xMax
+						InterlockedMax(CompositeRect[2], (uint)(Tris[i].BoundsMax.x * 8192));
+						//yMax
+						InterlockedMax(CompositeRect[3], (uint)(Tris[i].BoundsMax.y * 8192));
+					}
+					else
+					{
+						//xMin
+						InterlockedMin(CompositeRect[0], (uint)(uv1Location.x * 8192)); // convert from uv float to maximum int range
+						//yMin
+						InterlockedMin(CompositeRect[1], (uint)(uv1Location.y * 8192));
+						//xMax
+						InterlockedMax(CompositeRect[2], (uint)(uv1Location.x * 8192));
+						//yMax
+						InterlockedMax(CompositeRect[3], (uint)(uv1Location.y * 8192));
+					}
+				}
+
+				return;
+			}
+		}
+	}
+}

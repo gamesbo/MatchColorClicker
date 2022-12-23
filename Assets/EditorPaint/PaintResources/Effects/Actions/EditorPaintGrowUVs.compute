@@ -1,0 +1,243 @@
+﻿// Copyright 2018 Prized Goat
+// Prized Goat is a small indie group of friends, if this file was obtained without purchase,
+// please support our efforts by purchasing a copy from the Unity Asset Store.  Thanks
+
+#pragma kernel CSMain
+
+struct Triangle
+{
+	// UV channel 1
+	float2 UVa0;
+	float2 UVa1;
+	float2 UVa2;
+
+	// UV channel 2
+	float2 UVb0;
+	float2 UVb1;
+	float2 UVb2;
+};
+
+// Image rez
+int resX;
+int resY;
+// Pixel offset for subRect rendering optimizations
+float3 idOffset;
+// Input diffuse
+Texture2D<float4> sampleTex;
+// Input Blend Alpha
+Texture2D<float4> sampleBlendAlphaTex;
+// Texture Sampler state
+SamplerState samplersampleTex;
+// Output diffuse
+RWTexture2D<float4> rendTex;
+// Output Blend Alpha
+RWTexture2D<float4> rendBlendAlphaTex;
+// Mesh triangle UVs
+const StructuredBuffer<Triangle> tris;
+
+// Calculate signed triangle area using a kind of "2D cross product":
+float TriArea(float2 p1, float2 p2, float2 p3)
+{
+	float2 v1 = p1 - p3;
+	float2 v2 = p2 - p3;
+	return (v1.x * v2.y - v1.y * v2.x) / 2;
+}
+
+float distToLineSeg2D(float2 l1, float2 l2, float2 p)
+{
+	float2 ld = l1 - l2;
+	float2 pd = p - l2;
+
+	return length(pd - ld * clamp(dot(pd, ld) / dot(ld, ld), 0.0, 1.0));
+}
+
+float signedToLine2D(float2 l1, float2 l2, float2 p)
+{
+	float2 ld = l1 - l2;
+	float2 pd = p - l2;
+	return sign(ld.x * pd.y - ld.y * pd.x);
+}
+
+bool checkIfPointInTriangle(float2 id, float2 uv)
+{
+	float2 u1;
+	float2 u2;
+	float2 u3;
+	float a;
+	float a1;
+	float a2;
+	float a3;
+
+	bool inTriangle = false;
+
+	for (uint i = 0; i < tris.Length; i++)
+	{
+		u1 = tris[i].UVa0; // get the triangle UVs
+		u2 = tris[i].UVa1;
+		u3 = tris[i].UVa2;
+		// calculate triangle area - if zero, skip it
+		a = TriArea(u1, u2, u3);
+		if (a == 0)
+		{
+			continue;
+		}
+		// calculate barycentric coordinates of u1, u2 and u3
+		// if anyone is negative, point is outside the triangle: skip it
+		a1 = TriArea(u2, u3, uv) / a;
+		if (a1 < 0)
+		{
+			continue;
+		}
+
+		a2 = TriArea(u3, u1, uv) / a;
+		if (a2 < 0)
+		{
+			continue;
+		}
+
+		a3 = TriArea(u1, u2, uv) / a;
+		if (a3 < 0)
+		{
+			continue;
+		}
+
+		float2 uv1Location = (a1 * u1) + (a2 * u2) + (a3 * u3);
+
+		rendTex[id.xy] = sampleTex.SampleLevel(samplersampleTex, uv1Location, 0);
+		rendBlendAlphaTex[id.xy] = sampleBlendAlphaTex.SampleLevel(samplersampleTex, uv1Location, 0);
+		inTriangle = true;
+
+		i = tris.Length;   //assumes the first valid value found is the only value we need to find.
+	}
+
+	return inTriangle;
+}
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID, uint3 Gid : SV_GroupID, uint3 GTid : SV_GroupThreadID, uint GI : SV_GroupIndex)
+{
+	// This offsets the render space to work with the tiled rendering
+	int3 offsetID = id + idOffset;
+
+	// Plus a half pixel offset
+	float2 uv = float2((float)offsetID.x / resX, (float)offsetID.y / resY) + float2(0.5f / resX, 0.5f / resY);
+
+	bool inTriangle = false;
+	inTriangle = checkIfPointInTriangle(offsetID.xy, uv.xy);
+
+	float closestLineDist = 9999999999.0f;
+	int closestLine = 0;
+	float2 lineVector = float2(0, 0);
+	int lineNum = 0;
+	
+	if (!inTriangle)
+	{
+		float lineDist = 0.0f;
+		float2 pixelOffset = float2(1.0f / resX, 1.0f / resY);
+		int successNum = 0;
+
+		for (uint i = 0; i < tris.Length; i++)
+		{
+			successNum = 0;
+
+			// Find if line is closest line
+			lineDist = distToLineSeg2D(tris[i].UVa0, tris[i].UVa1, uv);
+			lineDist = abs(lineDist);
+			if (lineDist < closestLineDist)
+			{
+				closestLineDist = lineDist;
+				successNum = 1;
+			}
+
+			lineDist = distToLineSeg2D(tris[i].UVa1, tris[i].UVa2, uv);
+			lineDist = abs(lineDist);
+			if (lineDist < closestLineDist)
+			{
+				closestLineDist = lineDist;
+				successNum = 2;
+			}
+
+			lineDist = distToLineSeg2D(tris[i].UVa2, tris[i].UVa0, uv);
+			lineDist = abs(lineDist);
+			if (lineDist < closestLineDist)
+			{
+				closestLineDist = lineDist;
+				successNum = 3;
+			}
+
+			// if closest line, process line vector
+			if (successNum == 1)
+			{
+				closestLine = i;
+				lineVector = tris[i].UVa0 - tris[i].UVa1;
+				lineVector = float2(lineVector.y, -lineVector.x);
+				lineVector = normalize(lineVector) * pixelOffset;
+				lineNum = 1;
+				continue;
+			}
+			if (successNum == 2)
+			{
+				closestLine = i;
+				lineVector = tris[i].UVa1 - tris[i].UVa2;
+				lineVector = float2(lineVector.y, -lineVector.x);
+				lineVector = normalize(lineVector) * pixelOffset;
+				lineNum = 2;
+				continue;
+			}
+			if (successNum == 3)
+			{
+				closestLine = i;
+				lineVector = tris[i].UVa2 - tris[i].UVa0;
+				lineVector = float2(lineVector.y, -lineVector.x);
+				lineVector = normalize(lineVector) * pixelOffset;
+				lineNum = 3;
+			}
+		}
+	}
+
+	if(!inTriangle || closestLineDist < (1.0f / resX))
+	{
+		if (lineNum == 1)
+		{
+			float distanceToPoint = length(tris[closestLine].UVa0 - uv);
+			float lineLength = length(tris[closestLine].UVa0 - tris[closestLine].UVa1);
+			//c2-a2=b2
+			float distanceOnLine = saturate(sqrt((distanceToPoint * distanceToPoint) - (closestLineDist * closestLineDist)) / lineLength);
+
+			float2 newUV = lerp(tris[closestLine].UVa0, tris[closestLine].UVa1, distanceOnLine);
+			newUV += float2(0.5f / resX, 0.5f / resY);  // half pixel offset
+			newUV = newUV - lineVector;
+
+			rendTex[offsetID.xy] = sampleTex.SampleLevel(samplersampleTex, newUV, 0);
+			rendBlendAlphaTex[offsetID.xy] = sampleBlendAlphaTex.SampleLevel(samplersampleTex, newUV, 0);
+		}
+		else if (lineNum == 2)
+		{
+			float distanceToPoint = length(tris[closestLine].UVa1 - uv);
+			float lineLength = length(tris[closestLine].UVa1 - tris[closestLine].UVa2);
+			//c2-a2=b2
+			float distanceOnLine = saturate(sqrt((distanceToPoint * distanceToPoint) - (closestLineDist * closestLineDist)) / lineLength);
+
+			float2 newUV = lerp(tris[closestLine].UVa1, tris[closestLine].UVa2, distanceOnLine);
+			newUV += float2(0.5f / resX, 0.5f / resY);  // half pixel offset
+			newUV = newUV - lineVector;
+
+			rendTex[offsetID.xy] = sampleTex.SampleLevel(samplersampleTex, newUV, 0);
+			rendBlendAlphaTex[offsetID.xy] = sampleBlendAlphaTex.SampleLevel(samplersampleTex, newUV, 0);
+		}
+		else if (lineNum == 3)
+		{
+			float distanceToPoint = length(tris[closestLine].UVa2 - uv);
+			float lineLength = length(tris[closestLine].UVa2 - tris[closestLine].UVa0);
+			//c2-a2=b2
+			float distanceOnLine = saturate(sqrt((distanceToPoint * distanceToPoint) - (closestLineDist * closestLineDist)) / lineLength);
+
+			float2 newUV = lerp(tris[closestLine].UVa2, tris[closestLine].UVa0, distanceOnLine);
+			newUV += float2(0.5f / resX, 0.5f / resY);  // half pixel offset
+			newUV = newUV - lineVector;
+
+			rendTex[offsetID.xy] = sampleTex.SampleLevel(samplersampleTex, newUV, 0);
+			rendBlendAlphaTex[offsetID.xy] = sampleBlendAlphaTex.SampleLevel(samplersampleTex, newUV, 0);
+		}
+	}
+}
