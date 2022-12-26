@@ -10,6 +10,6 @@ public class CamTarget : MonoBehaviour
     }
     void Update()
     {
-        transform.position = new Vector3(0, 0, PlayerController.instance.transform.position.z);
+        //transform.position = new Vector3(0, 0, PlayerController.instance.transform.position.z);
     }
 }

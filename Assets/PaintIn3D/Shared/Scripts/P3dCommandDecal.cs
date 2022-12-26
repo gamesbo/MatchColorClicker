@@ -69,7 +69,7 @@ namespace PaintIn3D
 			material.SetVector(P3dShader._EndPosition2, inv.MultiplyPoint(EndPosition2));
 			material.SetMatrix(P3dShader._Matrix, inv);
 			material.SetVector(P3dShader._Direction, Direction);
-			Debug.Log(material.GetColor(P3dShader._Color));
+			//Debug.Log(material.color);
 			material.SetColor(P3dShader._Color, P3dHelper.FromGamma(Color));
 			material.SetFloat(P3dShader._Opacity, Opacity);
 			material.SetFloat(P3dShader._Hardness, Hardness);

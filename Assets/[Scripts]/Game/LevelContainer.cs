@@ -14,4 +14,5 @@ public class LevelContainer : MonoBehaviour
     }
     #endregion
     public Transform PaintObj;
+    public GameObject levelTargetObj;
 }

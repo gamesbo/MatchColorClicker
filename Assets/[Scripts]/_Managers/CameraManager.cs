@@ -21,7 +21,7 @@ namespace EKTemplate
         {
             if (onMobile)
             {
-                transform.position = new Vector3(0, 14.1f, -11f);
+                transform.position = new Vector3(0, 17.5f, -13.25f);
             }
         }
     }
