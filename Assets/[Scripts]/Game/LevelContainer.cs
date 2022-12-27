@@ -15,4 +15,10 @@ public class LevelContainer : MonoBehaviour
     #endregion
     public Transform PaintObj;
     public GameObject levelTargetObj;
+
+    public int totalRedCount;
+    public int totalBlueCount;
+    public int totalGreenCount;
+    public int totalYellowCount;
+
 }
