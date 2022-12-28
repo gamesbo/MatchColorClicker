@@ -28,7 +28,7 @@ namespace EKTemplate
         {
             moneyText.text = GameManager.instance.money.ToString();
 
-            if (GameManager.instance.money < 50)
+            if (GameManager.instance.money < 175)
             {
                 yellowPrice.GetComponent<TMPro.TextMeshProUGUI>().color = new Color(1f, 0.29f, 0.2f, 1);
             }
@@ -37,7 +37,7 @@ namespace EKTemplate
                 yellowPrice.GetComponent<TMPro.TextMeshProUGUI>().color = new Color(0.44f, 1, 0.35f, 1);
             }
 
-            if (GameManager.instance.money < 55)
+            if (GameManager.instance.money < 125)
             {
                 bluePrice.GetComponent<TMPro.TextMeshProUGUI>().color = new Color(1f, 0.29f, 0.2f, 1);
             }
@@ -47,7 +47,7 @@ namespace EKTemplate
             }
 
 
-            if (GameManager.instance.money < 65)
+            if (GameManager.instance.money < 95)
             {
                 redPrice.GetComponent<TMPro.TextMeshProUGUI>().color = new Color(1f, 0.29f, 0.2f, 1);
             }
@@ -57,7 +57,7 @@ namespace EKTemplate
             }
 
 
-            if (GameManager.instance.money < 85)
+            if (GameManager.instance.money < 160)
             {
                 greenPrice.GetComponent<TMPro.TextMeshProUGUI>().color = new Color(1f, 0.29f, 0.2f, 1);
             }
