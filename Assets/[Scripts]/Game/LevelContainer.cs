@@ -1,4 +1,6 @@
 using UnityEngine;
+using System.Collections;
+using System.Collections.Generic;
 public class LevelContainer : MonoBehaviour
 {
     #region Singleton
@@ -20,5 +22,6 @@ public class LevelContainer : MonoBehaviour
     public int totalBlueCount;
     public int totalGreenCount;
     public int totalYellowCount;
-
+    public List<GameObject> percent = new List<GameObject>();
+    public bool isYellow = false;
 }

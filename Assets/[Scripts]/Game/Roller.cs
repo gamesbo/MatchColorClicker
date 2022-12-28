@@ -40,4 +40,27 @@ public class Roller : MonoBehaviour
             }
         }
     }
+    private void OnTriggerEnter(Collider other)
+    {
+        if (LevelContainer.instance.isYellow && !other.GetComponent<Percent>().isTouch)
+        {
+            if (other.CompareTag("Percent"))
+            {
+                LevelContainer.instance.percent.Add(other.gameObject);
+                other.GetComponent<Percent>().isTouch = true;
+            }
+        }
+    }
+    private void OnTriggerExit(Collider other)
+    {
+        if (!LevelContainer.instance.isYellow)
+        {
+            if (other.CompareTag("Percent"))
+            {
+                LevelContainer.instance.percent.Remove(other.gameObject);
+                other.GetComponent<Percent>().isTouch = false;
+
+            }
+        }
+    }
 }

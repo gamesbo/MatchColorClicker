@@ -5,7 +5,6 @@ using DG.Tweening;
 using TMPro;
 public class ColorButtons : MonoBehaviour
 {
-
     public GameObject mergeButton;
     public GameObject mergeButtonFake;
     public GameObject mergeButtonShine;
@@ -29,7 +28,6 @@ public class ColorButtons : MonoBehaviour
     float blueTime = 1;
     bool checkBlue = false;
     public TextMeshProUGUI blueCountText;
-
 
     float red = 5;
     float redTime = 1;
@@ -131,8 +129,8 @@ public class ColorButtons : MonoBehaviour
     public void BlueButton()
     {
         btnBlue.GetComponent<Animator>().SetTrigger("Select");
-        if (GameManager.instance.money < 55) return;
-        GameManager.instance.money -= 55;
+        if (GameManager.instance.money < 125) return;
+        GameManager.instance.money -= 125;
         StopAllCoroutines();
         CloseCircles();
         circleBlue.SetActive(true);
@@ -140,7 +138,7 @@ public class ColorButtons : MonoBehaviour
 
         GameObject money = Instantiate(Resources.Load("minusmoney"), new Vector3(TapManager.instance.transform.position.x + Random.Range(-2.9f, 2.9f), TapManager.instance.transform.position.y + 2.7f, 
             TapManager.instance.transform.position.z + 1.75f), Quaternion.Euler(24f, 0, 0)) as GameObject;
-        money.GetComponent<TextMeshPro>().text = "55$".ToString();
+        money.GetComponent<TextMeshPro>().text = "125$".ToString();
 
         money.transform.DOScale(1, 1.3f).SetEase(Ease.OutBounce).OnComplete(() =>
         {
@@ -185,8 +183,8 @@ public class ColorButtons : MonoBehaviour
     public void RedButton()
     {
         btnRed.GetComponent<Animator>().SetTrigger("Select");
-        if (GameManager.instance.money < 65) return;
-        GameManager.instance.money -= 65;
+        if (GameManager.instance.money < 95) return;
+        GameManager.instance.money -= 95;
         StopAllCoroutines();
         CloseCircles();
         circleRed.SetActive(true);
@@ -194,7 +192,7 @@ public class ColorButtons : MonoBehaviour
 
         GameObject money = Instantiate(Resources.Load("minusmoney"), new Vector3(TapManager.instance.transform.position.x + Random.Range(-2.9f, 2.9f), TapManager.instance.transform.position.y + 2.7f, 
             TapManager.instance.transform.position.z + 1.75f), Quaternion.Euler(24f, 0, 0)) as GameObject;
-        money.GetComponent<TextMeshPro>().text = "65$".ToString();
+        money.GetComponent<TextMeshPro>().text = "95$".ToString();
 
         money.transform.DOScale(1, 1.3f).SetEase(Ease.OutBounce).OnComplete(() =>
         {
@@ -240,8 +238,8 @@ public class ColorButtons : MonoBehaviour
     public void GreenButton()
     {
         btnGreen.GetComponent<Animator>().SetTrigger("Select");
-        if (GameManager.instance.money < 85) return;
-        GameManager.instance.money -= 85;
+        if (GameManager.instance.money < 160) return;
+        GameManager.instance.money -= 160;
         StopAllCoroutines();
         CloseCircles();
         circleGreen.SetActive(true);
@@ -249,7 +247,7 @@ public class ColorButtons : MonoBehaviour
 
         GameObject money = Instantiate(Resources.Load("minusmoney"), new Vector3(TapManager.instance.transform.position.x + Random.Range(-2.9f, 2.9f), TapManager.instance.transform.position.y + 2.7f, 
             TapManager.instance.transform.position.z + 1.75f), Quaternion.Euler(24f, 0, 0)) as GameObject;
-        money.GetComponent<TextMeshPro>().text = "85$".ToString();
+        money.GetComponent<TextMeshPro>().text = "160$".ToString();
         money.transform.DOScale(1, 1.3f).SetEase(Ease.OutBounce).OnComplete(() =>
         {
             Destroy(money, 0.2f);
@@ -294,16 +292,18 @@ public class ColorButtons : MonoBehaviour
     public void YellowButton()
     {
         btnYellow.GetComponent<Animator>().SetTrigger("Select");
-        if (GameManager.instance.money < 50) return;
-        GameManager.instance.money -= 50;
+        if (GameManager.instance.money < 175) return;
+        GameManager.instance.money -= 175;
         StopAllCoroutines();
         CloseCircles();
         circleYellow.SetActive(true);
         StartCoroutine(YellowCircle());
 
+        LevelContainer.instance.isYellow = true;
+
         GameObject money = Instantiate(Resources.Load("minusmoney"), new Vector3(TapManager.instance.transform.position.x + Random.Range(-2.9f, 2.9f), TapManager.instance.transform.position.y + 2.7f,
             TapManager.instance.transform.position.z + 1.75f), Quaternion.Euler(24f, 0, 0)) as GameObject;
-        money.GetComponent<TextMeshPro>().text = "50$".ToString();
+        money.GetComponent<TextMeshPro>().text = "175$".ToString();
         money.transform.DOScale(1, 1.3f).SetEase(Ease.OutBounce).OnComplete(() =>
         {
             Destroy(money, 0.2f);

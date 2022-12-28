@@ -15,6 +15,7 @@ public class TapManager : MonoBehaviour
     public Material selectedColor;
     public Material basedColor;
     public bool selectBased = false;
+    public bool isGameOver = false;
     #region Singleton
     public static TapManager instance = null;
     private void Awake()
@@ -48,10 +49,12 @@ public class TapManager : MonoBehaviour
     }
     void Update()
     {
+        if (isGameOver) return;
         if (!selectBased)
         {
             cylinder.GetComponent<SkinnedMeshRenderer>().materials[1].color = new Color(0.6f, 0.77f, 0.8f, 1);
             LevelContainer.instance.PaintObj.GetComponent<PaintIn3D.P3dPaintDecal>().Color = new Color(0.85f, 1f, 0.95f, 1);
+            LevelContainer.instance.isYellow = false;
             ChangeParticleSplashColor(0.6f, 0.77f, 0.8f);
         }
         if (canClick)
@@ -59,11 +62,12 @@ public class TapManager : MonoBehaviour
             if (Input.GetMouseButtonDown(0))
             {
                 Haptic.LightTaptic();
-                if (cylinder.localScale.z > 0.575f)
+                if (cylinder.localScale.z > 0.6f)
                 {
-                    Debug.Log("end");
+                    isGameOver = true;
+                    LevelManager.instance.Success();
                 }
-                if (cylinder.localScale.z < 0.58f)
+                if (cylinder.localScale.z < 0.61f)
                 {
                     if (tw == null)
                     {

@@ -1,5 +1,6 @@
 ﻿using UnityEngine;
 using DG.Tweening;
+using TMPro;
 
 namespace EKTemplate
 {
@@ -8,7 +9,7 @@ namespace EKTemplate
         public EndPanelContainer success;
         public EndPanelContainer fail;
         private EndPanelContainer activePanel;
-
+        public TextMeshProUGUI percentText;
         public void Success()
         {
             activePanel = success;
@@ -19,6 +20,10 @@ namespace EKTemplate
         {
             activePanel = fail;
             Appear(0.5f);
+        }
+        private void Update()
+        {
+            percentText.text = "%"+LevelContainer.instance.percent.Count +" MATCH".ToString();
         }
 
         private void Appear(float duration = 0.75f)
